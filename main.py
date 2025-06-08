@@ -159,8 +159,9 @@ class CompiledWanModel():
                 self.pipe.device.type,
             ),
         )
-        self.apply_cache()
+        
         self.apply_sage_attention()
+        self.apply_cache()
         
         # if self.compilation:
         #     torch._inductor.config.reorder_for_compute_comm_overlap = True

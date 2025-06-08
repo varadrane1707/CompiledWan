@@ -1,1 +1,1 @@
-torchrun --nproc_per_node=8 main.py --compilation True --use_sage_attention True
+torchrun --nproc_per_node=8 main.py --compilation False --use_sage_attention True --cache_type "fbcache"
