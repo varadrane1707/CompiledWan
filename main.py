@@ -26,27 +26,27 @@ from transformers import CLIPVisionModel, UMT5EncoderModel
 from diffusers.video_processor import VideoProcessor
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 
 # from diffusers import attention_backend
 
 class CompilationConfig():
-    cache_type: str = "teacache"
-    cache_threshold: float = 0.1
+    cache_type: str = "fbcache"
+    cache_threshold: float = 0.08
     compilation : bool = False
     model_id : str = "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers"
     warmup : bool = True
     quantization : bool = False
-    use_sage_attention : bool = True
+    use_sage_attention : bool = False
 
 class CompiledWanModel():
     
     def __init__(self,config: CompilationConfig):
-        logger.info(f"Initializing CompiledWanModel pipeline with model")
+        print(f"Initializing CompiledWanModel pipeline with model")
         
         dist.init_process_group(backend='nccl', init_method='env://')
         rank = dist.get_rank()
-        logger.info(f"Rank: {rank}")
+        print(f"Rank: {rank}")
         torch.cuda.set_device(rank)
         start_load_time = time.time()
         
@@ -69,11 +69,11 @@ class CompiledWanModel():
         try:
             self.load_model()
             self.optimize_pipe()
-            logger.info(f"Pipeline initialized {self.model_id} in {time.time() - start_load_time} seconds")
+            print(f"Pipeline initialized {self.model_id} in {time.time() - start_load_time} seconds")
             if self.warmup:
                 self.warmup_step()
         except Exception as e:
-            logger.error(f"Error loading model: {e}")
+            print(f"Error loading model: {e}")
             raise e
                 
     def max_memory_usage(self):
@@ -91,7 +91,7 @@ class CompiledWanModel():
         memory_used = self.get_gpu_memory_usage()
         memory_total = self.max_memory_usage()
         memory_percent = (memory_used / memory_total) * 100
-        logger.info(f"GPU Memory Usage {message}: {memory_used:.2f}MB / {memory_total:.2f}MB ({memory_percent:.2f}%)")
+        print(f"GPU Memory Usage {message}: {memory_used:.2f}MB / {memory_total:.2f}MB ({memory_percent:.2f}%)")
         return memory_used
                 
     def load_model(self):
@@ -122,7 +122,7 @@ class CompiledWanModel():
         if self.cache_type == "fbcache":
             from para_attn.first_block_cache.diffusers_adapters import apply_cache_on_pipe
             apply_cache_on_pipe(self.pipe , residual_diff_threshold=self.cache_threshold)
-            logger.info(f"Cache applied with fbcache and residual_diff_threshold = {self.cache_threshold}")
+            print(f"Cache applied with fbcache and residual_diff_threshold = {self.cache_threshold}")
         elif self.cache_type == "teacache":
             from cachify import teacache_forward
             import types
@@ -141,12 +141,14 @@ class CompiledWanModel():
             
     def apply_sage_attention(self):
         if self.use_sage_attention:
+            print("Applying Sage Attention!")
             from sageattention import sageattn
             from modile_model_sage import set_sage_attn_wan
             with torch.autocast("cuda", torch.bfloat16, cache_enabled=False):
                 set_sage_attn_wan(self.pipe.transformer, sageattn) 
     def apply_quantization(self):
         if self.quantization:
+            print("Applying Quantization!")
             from torchao.quantization import quantize_, float8_dynamic_activation_float8_weight, float8_weight_only
             quantize_(self.pipe.text_encoder, float8_weight_only())
             quantize_(self.pipe.transformer, float8_dynamic_activation_float8_weight())
@@ -159,7 +161,7 @@ class CompiledWanModel():
                 self.pipe.device.type,
             ),
         )
-        
+        self.apply_quantization()
         self.apply_sage_attention()
         self.apply_cache()
         
@@ -168,7 +170,7 @@ class CompiledWanModel():
         #     self.pipe.transformer = torch.compile(self.pipe.transformer, mode="max-autotune-no-cudagraphs")
     
     def warmup_step(self):
-        logger.info("Running Warm Up!")
+        print("Running Warm Up!")
         prompt = "A car driving on a road"
         negative_prompt = "blurry, low quality, dark"
         image = load_image("https://storage.googleapis.com/falserverless/gallery/car_720p.png")
@@ -186,16 +188,16 @@ class CompiledWanModel():
                 guidance_scale=5.0
             )
         self.get_matrix(start_time,time.time(),576,1024)
-        logger.info("Warm Up Completed!")
+        print("Warm Up Completed!")
     
     def get_matrix(self,start_time : int,end_time : int,height : int,width : int):
-        logger.info("-"*40)
-        logger.info(f"Order_ID : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"inference time : {end_time - start_time}")
-        logger.info(f"height : {height}")
-        logger.info(f"width : {width}")
-        logger.info("-"*40)
-        logger.info("\n")
+        print("-"*40)
+        print(f"Order_ID : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"inference time : {end_time - start_time}")
+        print(f"height : {height}")
+        print(f"width : {width}")
+        print("-"*40)
+        print("\n")
         
     def generate_video(self,prompt : str,negative_prompt : str,image : Image.Image,num_frames : int = 81,guidance_scale : float = 5.0,num_inference_steps : int = 30,height : int = 576,width : int = 1024,fps : int = 16):
         with torch.inference_mode():
@@ -218,30 +220,25 @@ class CompiledWanModel():
         
     def shutdown(self):
         dist.destroy_process_group()
-        logger.info("Pipeline shutdown completed")
+        print("Pipeline shutdown completed")
         
         
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_id", type=str, default="Wan-AI/Wan2.1-I2V-14B-720P-Diffusers")
-    parser.add_argument("--attention_type", type=str, default="sage")
-    parser.add_argument("--cache_type", type=str, default="teacache")
-    parser.add_argument("--cache_threshold", type=float, default=0.1)
-    parser.add_argument("--compilation", type=bool, default=False)
-    parser.add_argument("--use_sage_attention", type=bool, default=True)
+    # parser.add_argument("--model_id", type=str, default="Wan-AI/Wan2.1-I2V-14B-720P-Diffusers")
+    # parser.add_argument("--attention_type", type=str, default="sage")
+    # parser.add_argument("--cache_type", type=str, default="teacache")
+    # parser.add_argument("--cache_threshold", type=float, default=0.1)
+    # parser.add_argument("--compilation", type=bool, default=False)
+    # parser.add_argument("--use_sage_attention", type=bool, default=True)
+    # parser.add_argument("--quantization", type=bool, default=False)
     
     os.environ["MASTER_ADDR"] = "localhost"  # or the IP of the master node
     os.environ["MASTER_PORT"] = "29500"      # any free port                # rank of this process
     os.environ["WORLD_SIZE"] = str(8)
     
     config = CompilationConfig()
-    config.model_id = parser.parse_args().model_id
-    config.attention_type = parser.parse_args().attention_type
-    config.cache_type = parser.parse_args().cache_type
-    config.cache_threshold = parser.parse_args().cache_threshold
-    config.compilation = parser.parse_args().compilation
-    config.use_sage_attention = parser.parse_args().use_sage_attention
     model = CompiledWanModel(config)
     
     with open("inputs.json", "r") as f:
