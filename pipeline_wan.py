@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import PIL
 import regex as re
-# import torch
+import torch
 from transformers import AutoTokenizer, CLIPImageProcessor, CLIPVisionModel, UMT5EncoderModel
 
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
@@ -14,8 +14,8 @@ from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import is_ftfy_available, is_torch_xla_available, logging, replace_example_docstring
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
-from diffusers.pipeline_utils import DiffusionPipeline
-from diffusers.pipeline_output import WanPipelineOutput
+from diffusers.pipelines.pipeline_utils import DiffusionPipeline
+from diffusers.pipelines.wan.pipeline_output import WanPipelineOutput
 
 from transformer_wan import WanTransformer3DModel
 

@@ -15,20 +15,20 @@
 import math
 from typing import Any, Dict, Optional, Tuple, Union
 
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
 from diffusers.utils import USE_PEFT_BACKEND, logging, scale_lora_layers, unscale_lora_layers
-from diffusers.attention import FeedForward
+from diffusers.models.attention import FeedForward
 # from diffusers.attention_processor import Attention
-from diffusers.cache_utils import CacheMixin
-from diffusers.embeddings import PixArtAlphaTextProjection, TimestepEmbedding, Timesteps, get_1d_rotary_pos_embed
-from diffusers.modeling_outputs import Transformer2DModelOutput
-from diffusers.modeling_utils import ModelMixin
-from diffusers.normalization import FP32LayerNorm
+from diffusers.models.cache_utils import CacheMixin
+from diffusers.models.embeddings import PixArtAlphaTextProjection, TimestepEmbedding, Timesteps, get_1d_rotary_pos_embed
+from diffusers.models.modeling_outputs import Transformer2DModelOutput
+from diffusers.models.modeling_utils import ModelMixin
+from diffusers.models.normalization import FP32LayerNorm
 
 from diffusers_attention import Attention
 

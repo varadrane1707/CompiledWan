@@ -142,7 +142,7 @@ class CompiledWanModel():
     def apply_sage_attention(self):
         if self.use_sage_attention:
             from sageattention import sageattn
-            from sage_attn import set_sage_attn_wan
+            from modile_model_sage import set_sage_attn_wan
             with torch.autocast("cuda", torch.bfloat16, cache_enabled=False):
                 set_sage_attn_wan(self.pipe.transformer, sageattn) 
     def apply_quantization(self):
@@ -162,9 +162,9 @@ class CompiledWanModel():
         self.apply_cache()
         self.apply_sage_attention()
         
-        if self.compilation:
-            torch._inductor.config.reorder_for_compute_comm_overlap = True
-            self.pipe.transformer = torch.compile(self.pipe.transformer, mode="max-autotune-no-cudagraphs")
+        # if self.compilation:
+        #     torch._inductor.config.reorder_for_compute_comm_overlap = True
+        #     self.pipe.transformer = torch.compile(self.pipe.transformer, mode="max-autotune-no-cudagraphs")
     
     def warmup_step(self):
         logger.info("Running Warm Up!")
