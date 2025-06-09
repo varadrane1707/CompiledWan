@@ -31,23 +31,25 @@ logging.basicConfig(level=logging.INFO)
 # from diffusers import attention_backend
 
 class CompilationConfig():
-    cache_type: str = "fbcache"
-    cache_threshold: float = 0.1
+    cache_type: str = "none"  # Disable caching for temporal coherence test
+    cache_threshold: float = 0.05
     compilation : bool = False
     model_id : str = "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers"
     warmup : bool = True
     quantization : bool = False
     use_sage_attention : bool = False
+    use_context_parallel : bool = False  # Disable context parallel for temporal coherence test
 
 class CompiledWanModel():
     
     def __init__(self,config: CompilationConfig):
         print(f"Initializing CompiledWanModel pipeline with model")
-        
-        dist.init_process_group(backend='nccl', init_method='env://')
-        rank = dist.get_rank()
-        print(f"Rank: {rank}")
-        torch.cuda.set_device(rank)
+        self.use_context_parallel = config.use_context_parallel
+        if self.use_context_parallel:
+            dist.init_process_group(backend='nccl', init_method='env://')
+            rank = dist.get_rank()
+            print(f"Rank: {rank}")
+            torch.cuda.set_device(rank)
         start_load_time = time.time()
         
         self.model_id = config.model_id
@@ -100,10 +102,10 @@ class CompiledWanModel():
             self.vae = AutoencoderKLWan.from_pretrained(self.model_id, subfolder="vae", torch_dtype=torch.float32)
             self.image_encoder = CLIPVisionModel.from_pretrained(self.model_id, subfolder="image_encoder", torch_dtype=torch.float32)
             self.transformer = WanTransformer3DModel.from_pretrained(self.model_id, subfolder="transformer", torch_dtype=torch.bfloat16)
-            self.transformer.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=torch.bfloat16)
-            self.vae_scale_factor_temporal = 2 ** sum(self.vae.temperal_downsample) if getattr(self, "vae", None) else 4
-            self.vae_scale_factor_spatial = 2 ** len(self.vae.temperal_downsample) if getattr(self, "vae", None) else 8
-            self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
+            # self.transformer.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=torch.bfloat16)
+            # self.vae_scale_factor_temporal = 2 ** sum(self.vae.temperal_downsample) if getattr(self, "vae", None) else 4
+            # self.vae_scale_factor_spatial = 2 ** len(self.vae.temperal_downsample) if getattr(self, "vae", None) else 8
+            # self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
             
             self.pipe = WanImageToVideoPipeline.from_pretrained(
                 self.model_id,
@@ -154,13 +156,14 @@ class CompiledWanModel():
             quantize_(self.pipe.transformer, float8_dynamic_activation_float8_weight())
         
     def optimize_pipe(self):
-        parallelize_vae(self.vae)
-        parallelize_pipe( 
-            self.pipe,
-            mesh=init_context_parallel_mesh(
-                self.pipe.device.type,
-            ),
-        )
+        if self.use_context_parallel:
+            parallelize_vae(self.vae)
+            parallelize_pipe( 
+                self.pipe,
+                mesh=init_context_parallel_mesh(
+                    self.pipe.device.type,
+                ),
+            )
         self.apply_quantization()
         self.apply_sage_attention()
         self.apply_cache()
@@ -212,15 +215,21 @@ class CompiledWanModel():
             num_inference_steps=num_inference_steps,
             output_type="pil",
             ).frames[0]
-            
-        if dist.get_rank() == 0:
-            import uuid 
-            export_to_video(output, f"outputs/compiled_{uuid.uuid4()}.mp4", fps=fps)
+        
+        import uuid
+        if self.use_context_parallel:
+            if dist.get_rank() == 0:
+               
+              export_to_video(output, f"outputs/compiled_{uuid.uuid4()}.mp4", fps=fps)
+              return output
+        else:
+            export_to_video(output, f"outputs/single_compiled_{uuid.uuid4()}.mp4", fps=fps)
             return output
         
     def shutdown(self):
-        dist.destroy_process_group()
-        print("Pipeline shutdown completed")
+        if self.use_context_parallel:
+            dist.destroy_process_group()
+            print("Pipeline shutdown completed")
         
         
 if __name__ == "__main__":

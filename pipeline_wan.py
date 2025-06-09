@@ -710,16 +710,50 @@ class WanImageToVideoPipeline(DiffusionPipeline, WanLoraLoaderMixin):
 
         if not output_type == "latent":
             latents = latents.to(self.vae.dtype)
+            
+            # Debug: Check for invalid values before normalization
+            if torch.isnan(latents).any() or torch.isinf(latents).any():
+                print("WARNING: Invalid values detected in latents before normalization")
+                print(f"Latents stats: min={latents.min()}, max={latents.max()}, mean={latents.mean()}")
+                latents = torch.nan_to_num(latents, nan=0.0, posinf=1.0, neginf=-1.0)
+            
             latents_mean = (
                 torch.tensor(self.vae.config.latents_mean)
                 .view(1, self.vae.config.z_dim, 1, 1, 1)
                 .to(latents.device, latents.dtype)
             )
-            latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
+            # Use the same calculation as in prepare_latents: 1.0 / std
+            latents_std_inv = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
                 latents.device, latents.dtype
             )
-            latents = latents / latents_std + latents_mean
+            
+            # Debug: Check latents_std for zeros or very small values
+            if torch.any(torch.abs(latents_std_inv) < 1e-8):
+                print("WARNING: Very small or zero values in latents_std_inv detected")
+                print(f"Problematic std_inv values: {latents_std_inv[torch.abs(latents_std_inv) < 1e-8]}")
+                latents_std_inv = torch.clamp(latents_std_inv, min=1e-8)
+            
+            # Apply denormalization: since prepare_latents uses (x - mean) * (1/std), 
+            # decoding should use: x / (1/std) + mean
+            latents = latents / latents_std_inv + latents_mean
+            
+            # Debug: Check for invalid values after normalization
+            if torch.isnan(latents).any() or torch.isinf(latents).any():
+                print("WARNING: Invalid values detected in latents after normalization")
+                print(f"Post-norm latents stats: min={latents.min()}, max={latents.max()}, mean={latents.mean()}")
+                latents = torch.nan_to_num(latents, nan=0.0, posinf=1.0, neginf=-1.0)
+            
             video = self.vae.decode(latents, return_dict=False)[0]
+            
+            # Debug: Check video output for invalid values
+            if torch.isnan(video).any() or torch.isinf(video).any():
+                print("WARNING: Invalid values detected in video after VAE decode")
+                print(f"Video stats: min={video.min()}, max={video.max()}, mean={video.mean()}")
+                video = torch.nan_to_num(video, nan=0.0, posinf=1.0, neginf=-1.0)
+            
+            # Clamp video values to reasonable range before post-processing
+            video = torch.clamp(video, min=-1.0, max=1.0)
+            
             video = self.video_processor.postprocess_video(video, output_type=output_type)
         else:
             video = latents

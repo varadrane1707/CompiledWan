@@ -22,8 +22,10 @@ class WanAttnProcessor2_0:
     ) -> torch.Tensor:
         encoder_hidden_states_img = None
         if attn.add_k_proj is not None:
-            encoder_hidden_states_img = encoder_hidden_states[:, :257]
-            encoder_hidden_states = encoder_hidden_states[:, 257:]
+            # 512 is the context length of the text encoder, hardcoded for now
+            image_context_length = encoder_hidden_states.shape[1] - 512
+            encoder_hidden_states_img = encoder_hidden_states[:, :image_context_length]
+            encoder_hidden_states = encoder_hidden_states[:, image_context_length:]
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
 
@@ -90,3 +92,4 @@ def set_sage_attn_wan(
     for idx, block in enumerate(model.blocks):
         processor = WanAttnProcessor2_0(attn_func)
         block.attn1.processor = processor
+        block.attn2.processor = processor
