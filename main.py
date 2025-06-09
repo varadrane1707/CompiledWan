@@ -32,7 +32,7 @@ logging.basicConfig(level=logging.INFO)
 
 class CompilationConfig():
     cache_type: str = "fbcache"
-    cache_threshold: float = 0.08
+    cache_threshold: float = 0.1
     compilation : bool = False
     model_id : str = "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers"
     warmup : bool = True
