@@ -21,6 +21,7 @@ from para_attn.utils import (
     get_force_dispatch_to_custom_ops,
     torch_version_check,
 )
+from sageattn import attention_forward
 
 try:
     from torch.distributed.tensor.experimental._attention import _templated_ring_attention
