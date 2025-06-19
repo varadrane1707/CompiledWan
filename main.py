@@ -15,10 +15,10 @@ from para_attn.context_parallel import init_context_parallel_mesh
 from para_attn.context_parallel.diffusers_adapters import parallelize_pipe
 from para_attn.parallel_vae.diffusers_adapters import parallelize_vae
 
-# from diffusers import AutoencoderKLWan, WanImageToVideoPipeline,WanTransformer3DModel
-from diffusers import AutoencoderKLWan
-from pipeline_wan import WanImageToVideoPipeline
-from transformer_wan import WanTransformer3DModel
+from diffusers import AutoencoderKLWan, WanImageToVideoPipeline,WanTransformer3DModel
+# from diffusers import AutoencoderKLWan
+# from pipeline_wan import WanImageToVideoPipeline
+# from transformer_wan import WanTransformer3DModel
 
 from diffusers.utils import export_to_video, load_image
 from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
@@ -31,14 +31,14 @@ logging.basicConfig(level=logging.INFO)
 # from diffusers import attention_backend
 
 class CompilationConfig():
-    cache_type: str = "none"  # Disable caching for temporal coherence test
-    cache_threshold: float = 0.05
+    cache_type: str = "fbcache"  # Disable caching for temporal coherence test
+    cache_threshold: float = 0.1
     compilation : bool = False
     model_id : str = "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers"
-    warmup : bool = True
+    warmup : bool = False
     quantization : bool = False
-    use_sage_attention : bool = False
-    use_context_parallel : bool = False  # Disable context parallel for temporal coherence test
+    use_sage_attention : bool = True
+    use_context_parallel : bool = True  # Disable context parallel for temporal coherence test
 
 class CompiledWanModel():
     
@@ -107,6 +107,12 @@ class CompiledWanModel():
             # self.vae_scale_factor_spatial = 2 ** len(self.vae.temperal_downsample) if getattr(self, "vae", None) else 8
             # self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
             
+            if self.quantization:
+                print("Applying Quantization!")
+                from torchao.quantization import quantize_, float8_dynamic_activation_float8_weight, float8_weight_only
+                # quantize_(self.pipe.text_encoder, float8_weight_only())
+                self.transformer = quantize_(self.transformer, float8_dynamic_activation_float8_weight())
+            
             self.pipe = WanImageToVideoPipeline.from_pretrained(
                 self.model_id,
                 vae=self.vae,
@@ -117,8 +123,8 @@ class CompiledWanModel():
             )
             self.pipe.scheduler = UniPCMultistepScheduler.from_config(self.pipe.scheduler.config, flow_shift=self.flow_shift)
             self.pipe.to("cuda")
+        
             
-            self.pipe
             
     def apply_cache(self):
         if self.cache_type == "fbcache":
@@ -143,18 +149,13 @@ class CompiledWanModel():
             
     def apply_sage_attention(self):
         if self.use_sage_attention:
-            print("Applying Sage Attention!")
-            from sageattention import sageattn
-            from modile_model_sage import set_sage_attn_wan
-            with torch.autocast("cuda", torch.bfloat16, cache_enabled=False):
-                set_sage_attn_wan(self.pipe.transformer, sageattn) 
-    def apply_quantization(self):
-        if self.quantization:
-            print("Applying Quantization!")
-            from torchao.quantization import quantize_, float8_dynamic_activation_float8_weight, float8_weight_only
-            quantize_(self.pipe.text_encoder, float8_weight_only())
-            quantize_(self.pipe.transformer, float8_dynamic_activation_float8_weight())
-        
+            # print("Applying Sage Attention!")
+            # from sageattention import sageattn
+            # from modile_model_sage import set_sage_attn_wan
+            # with torch.autocast("cuda", torch.bfloat16, cache_enabled=False):
+            #     set_sage_attn_wan(self.transformer, sageattn) 
+            pass
+    
     def optimize_pipe(self):
         if self.use_context_parallel:
             parallelize_vae(self.vae)
@@ -164,8 +165,8 @@ class CompiledWanModel():
                     self.pipe.device.type,
                 ),
             )
-        self.apply_quantization()
-        self.apply_sage_attention()
+        # self.apply_quantization()
+        # self.apply_sage_attention()
         self.apply_cache()
         
         # if self.compilation:
@@ -220,7 +221,7 @@ class CompiledWanModel():
         if self.use_context_parallel:
             if dist.get_rank() == 0:
                
-              export_to_video(output, f"outputs/compiled_{uuid.uuid4()}.mp4", fps=fps)
+              export_to_video(output, f"outputs/multi_compiled_{uuid.uuid4()}.mp4", fps=fps)
               return output
         else:
             export_to_video(output, f"outputs/single_compiled_{uuid.uuid4()}.mp4", fps=fps)

@@ -21,7 +21,7 @@ from para_attn.utils import (
     get_force_dispatch_to_custom_ops,
     torch_version_check,
 )
-from sageattn import attention_forward
+from sageattention import sageattn
 
 try:
     from torch.distributed.tensor.experimental._attention import _templated_ring_attention
@@ -111,10 +111,16 @@ def ulysses_attn_func(
     key = _sdpa_input_all_to_all(key, mesh)
     value = _sdpa_input_all_to_all(value, mesh)
 
-    if attn_func is None:
-        attn_func = F.scaled_dot_product_attention
-
-    out = attn_func(query, key, value, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+    # Use the sageattn function from SageAttention
+    out, _ = sageattn(
+        query,
+        key,
+        value,
+        tensor_layout="HND",  # Assuming HND layout for compatibility
+        is_causal=is_causal,
+        sm_scale=scale,
+        return_lse=False
+    )
 
     out = _sdpa_output_all_to_all(out, mesh)
     return out
@@ -216,14 +222,12 @@ def ring_attn_func(
     pg = DP.get_group(mesh)
     world_size = DP.get_world_size(pg)
     if world_size <= 1:
-        return F.scaled_dot_product_attention(
+        return sageattn(
             query,
             key,
             value,
-            attn_mask=attn_mask,
-            dropout_p=dropout_p,
+            tensor_layout="HND",
             is_causal=is_causal,
-            scale=scale,
         )
 
     assert attn_mask is None, "attn_mask is not supported in ring_attn_func when world_size > 1"
@@ -263,14 +267,12 @@ def in_batch_attn_func(
     key = key.permute(1, 0, 2, 3).reshape(1, h, b * s_kv, -1)
     value = value.permute(1, 0, 2, 3).reshape(1, h, b * s_kv, -1)
 
-    out = F.scaled_dot_product_attention(
+    out = sageattn(
         query,
         key,
         value,
-        attn_mask=attn_mask,
-        dropout_p=dropout_p,
+        tensor_layout="HND",
         is_causal=is_causal,
-        scale=scale,
     )
 
     out = out.reshape(h, b, s_q, -1).permute(1, 0, 2, 3)
@@ -444,7 +446,7 @@ class UnifiedAttnMode(BaseTorchFunctionMode):
         return base_handle_torch_function(func, types, args, kwargs)
 
     def _call_unified_attn_func(self, *args, **kwargs):
-        func = F.scaled_dot_product_attention
+        func = sageattn
         parallel_method = self._parallel_method
         if parallel_method == "ulysses":
             self._parallel_method = "ring"

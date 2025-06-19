@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from typing import Callable, List, Optional, Tuple, Union
 from diffusers_attention import Attention
-from transformer_wan import WanTransformer3DModel
+from diffusers import WanTransformer3DModel
 from functools import partial
 
 
